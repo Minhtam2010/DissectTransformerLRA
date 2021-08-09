@@ -171,13 +171,9 @@ def get_tc_datasets(n_devices,
   test_dataset = test_dataset.map(tokenize, num_parallel_calls=AUTOTUNE)
 
   max_shape = {'inputs': [max_length], 'targets': []}
-  # train_dataset = train_dataset.shuffle(
-  #     buffer_size=256, reshuffle_each_iteration=True).padded_batch(
-  #         batch_size, padded_shapes=max_shape)
-  # train_dataset = train_dataset.shuffle(
-  #     buffer_size=256, reshuffle_each_iteration=True).padded_batch(
-  #         batch_size, padded_shapes=max_shape)
-  train_dataset = train_dataset.padded_batch(batch_size, padded_shapes=max_shape)
+  train_dataset = train_dataset.shuffle(
+      buffer_size=256, reshuffle_each_iteration=True).padded_batch(
+          batch_size, padded_shapes=max_shape)
   val_dataset = val_dataset.padded_batch(batch_size, padded_shapes=max_shape)
   test_dataset = test_dataset.padded_batch(batch_size, padded_shapes=max_shape)
 

@@ -1,7 +1,3 @@
-"""
-This file is from https://github.com/mlpen/Nystromformer
-"""
-
 import sys
 sys.path.append("./long-range-arena/lra_benchmarks/listops/")
 import input_pipeline
@@ -9,7 +5,7 @@ import numpy as np
 import pickle
 
 train_ds, eval_ds, test_ds, encoder = input_pipeline.get_datasets(
-    n_devices = 1, task_name = "basic", data_dir = "./lra_release/listops-1000/",
+    n_devices = 1, task_name = "basic", data_dir = "./lra_release/lra_release/listops-1000/",
     batch_size = 1, max_length = 2000)
 
 mapping = {"train":train_ds, "dev": eval_ds, "test":test_ds}

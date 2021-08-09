@@ -20,12 +20,14 @@ import argparse
 import math
 import itertools
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, help="model", dest="model", required=True)
 parser.add_argument("--task", type=str, help="task", dest="task", required = False)
 parser.add_argument("--skip_train", type = int, help = "skip_train", dest = "skip_train", default = 0)
 parser.add_argument("--logging", action='store_true', default=False)
 parser.add_argument("--expname", type=str, default="default")
+parser.add_argument("--multi_gauss", type=bool, default=False)
 
 # Model configs
 parser.add_argument("--attention_grad_checkpointing", default=False, action="store_true")
@@ -82,8 +84,21 @@ parser.add_argument("--chk_path", default="LRA_chks", type=str)
 parser.add_argument("--test_flops", default=False, action='store_true')
 args = parser.parse_args()
 
-random.seed(args.seed)
-torch.manual_seed(args.seed)
+
+def seed_all(seed_value):
+    torch.manual_seed(seed_value)
+     # cpu  vars
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+
+    if torch.cuda.is_available(): 
+        torch.cuda.manual_seed(seed_value)
+        torch.cuda.manual_seed_all(seed_value) # gpu vars
+        torch.backends.cudnn.deterministic = True  #needed
+        torch.backends.cudnn.benchmark = False
+seed_all(args.seed)
+# random.seed(args.seed)
+# torch.manual_seed(args.seed)
 # cudnn.deterministic = True
 
 args.attn_type = args.model # remove attn_type in the future
@@ -91,7 +106,6 @@ args.mixed_precision = True # bool(args.mixed_precision)
 task = args.task
 
 checkpoint_dir = args.chk_path
-
 print(args)
 
 device_ids = list(range(torch.cuda.device_count()))
@@ -225,6 +239,10 @@ def print_summary(summary, save_if_improved, train_step_idx, subset):
     summary["loss"] = np.mean(summary["loss"])
     summary["accu"] = np.mean(summary["accu"])
 
+    _loss = np.mean(summary["loss"])
+    _acc = np.mean(summary["accu"])
+    
+
     print()
     if summary["accu"] > summary["best_accu"]:
         summary["best_accu"] = summary["accu"]
@@ -244,13 +262,17 @@ def print_summary(summary, save_if_improved, train_step_idx, subset):
     log_f.write(json.dumps(summary_round, sort_keys = True) + "\n")
     log_f.flush()
 
+
+
     summary["t"] = 0
     summary["loss"] = []
     summary["accu"] = []
 
+    return _loss, _acc
+# model_task_seed_head_dim__num_layers
 init_t = time.time()
-
-log_f_path = os.path.join(checkpoint_dir, f"{args.expname}_output.log")
+model_setup = f"{args.model}_{args.task}_{args.seed}_multigauss:{args.multi_gauss}"
+log_f_path = os.path.join(checkpoint_dir, model_setup + "_output.log")
 log_f = open(log_f_path, "a+")
 
 summary = {
@@ -262,7 +284,9 @@ summary = {
 accumu_steps = max(args.batch_size // len(device_ids) // 32, 1)
 print(f"accumu_steps={accumu_steps}")
 
+from collections import defaultdict
 
+save_metrics = defaultdict(list)
 if args.skip_train == 0:
     try:
         model.train()
@@ -270,11 +294,15 @@ if args.skip_train == 0:
             outputs = step("train", train_step_idx)
 
             if (train_step_idx + 1) % args.eval_frequency == 0:
-                print_summary(summary["train"], False, train_step_idx, 'train')
+                train_loss, train_acc = print_summary(summary["train"], False, train_step_idx, 'train')
+                save_metrics['train_loss'].append(train_loss)
+                save_metrics['train_acc'].append(train_acc)
                 model.eval()
                 for dev_step_idx in range(args.num_eval_steps):
                     outputs = step("dev", dev_step_idx)
-                print_summary(summary["dev"], True, train_step_idx, 'dev')
+                val_loss, val_acc = print_summary(summary["dev"], True, train_step_idx, 'dev')
+                save_metrics['val_loss'].append(val_loss)
+                save_metrics['val_acc'].append(val_acc)
                 model.train()
     except KeyboardInterrupt as e:
         print(e)
@@ -282,8 +310,24 @@ if args.skip_train == 0:
 checkpoint = torch.load(log_f_path.replace(".log", ".model"), map_location="cpu")
 model.module.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
+
 try:
     for test_step_idx in itertools.count():
         outputs = step("test", test_step_idx)
 except StopIteration:
-    print_summary(summary["test"], False, train_step_idx, 'test')
+    test_loss, test_acc = print_summary(summary["test"], False, train_step_idx, 'test')
+    save_metrics['test_loss'].append(test_loss)
+    save_metrics['test_acc'].append(test_acc)
+
+import json
+with open('result.json', 'r') as f:
+    data = json.load(f)
+data.update({model_setup:f'loss:{test_loss}, accuracy:{test_acc}'})
+with open('result.json', 'w') as f:
+    json.dump(data, f)
+
+with open('loss_metric.json', 'r') as f:
+    data = json.load(f)
+data.update({model_setup: save_metrics})
+with open('loss_metric.json', 'w') as f:
+    json.dump(data, f)

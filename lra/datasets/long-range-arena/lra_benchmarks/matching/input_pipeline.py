@@ -1,4 +1,4 @@
-# Copyright 2020 Google LLC
+# Copyright 2021 Google LLC
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -10,7 +10,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.\
+# limitations under the License.
 
 """Input pipeline for the imdb dataset."""
 
@@ -161,7 +161,9 @@ def get_matching_datasets(n_devices,
   test_dataset = test_dataset.map(tokenize, num_parallel_calls=AUTOTUNE)
 
   max_shape = {'inputs1': [max_length], 'inputs2': [max_length], 'targets': []}
-  train_dataset = train_dataset.padded_batch(
+  train_dataset = train_dataset.shuffle(
+      buffer_size=SHUFFLE_BUFFER_SIZE,
+      reshuffle_each_iteration=True).padded_batch(
           batch_size, padded_shapes=max_shape, drop_remainder=True)
   val_dataset = val_dataset.padded_batch(
       batch_size, padded_shapes=max_shape, drop_remainder=True)
