@@ -9,20 +9,45 @@ import json
 from torch.utils.checkpoint import checkpoint
 import pdb
 
+class MultiGaussKernel(nn.Module):
+    def __init__(self, config):
+        super(MultiGaussKernel, self).__init__()
+        self.var = torch.sqrt(torch.tensor(config.head_dim ,dtype = torch.float, device = 'cuda'))
+        self.mu = nn.Parameter((torch.randn(2, config.head_dim, device = 'cuda'))*torch.tensor([0.,1.], device= 'cuda')[:, None], requires_grad= True)
+        # self.mu = torch.tensor([0.0, -0.5], device= 'cuda') 
+        self.pi = nn.Parameter(torch.tensor([0.25, 0.73], device= 'cuda'))
+
+    def forward(self, query, key, mask):
+        # pi = self.
+        pi = torch.softmax(self.pi, dim = -1)
+        gauss = 0.
+        for i in range(self.mu.shape[0]):
+            QK_distance = (-1/(2*self.var))*torch.square(torch.cdist(query, key - self.mu[i])) - 1e6 * (1 - mask[:, None, None, :])
+            gauss = gauss+ torch.exp(QK_distance)*pi[i]
+            
+        # print(gauss/(gauss.sum(dim = -1)[:, :, :, None]))
+        # assert 1==2
+        return gauss/(gauss.sum(dim = -1)[:, :, :, None])
+
 class SoftmaxAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.drop_attn = torch.nn.Dropout(p=config.attention_dropout)
         self.head_dim = config.head_dim
+        self.multi_gauss = config.multi_gauss
+        if self.multi_gauss:
+            self.multi_gauss_kernel = MultiGaussKernel(config)
 
     def forward(self, Q, K, V, mask):
-        dot = torch.matmul(Q, torch.transpose(K, -2, -1))
-        dot = dot / math.sqrt(self.head_dim)
-        dot = dot - 1e6 * (1 - mask[:, None, None, :])
+        if self.multi_gauss:
+            attn = self.multi_gauss_kernel(Q, K, mask)
+        else:
+            dot = torch.matmul(Q, torch.transpose(K, -2, -1))
+            dot = dot / math.sqrt(self.head_dim)
+            dot = dot - 1e6 * (1 - mask[:, None, None, :])
 
-        attn = nn.functional.softmax(dot, dim = -1)
+            attn = nn.functional.softmax(dot, dim = -1)
         attn = self.drop_attn(attn)
-
         X = torch.matmul(attn, V)
         return X
 
